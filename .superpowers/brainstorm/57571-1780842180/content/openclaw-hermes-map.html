@@ -1,0 +1,48 @@
+<h2>OpenClaw vs Hermes: Long-Lived Agent Learning Map</h2>
+<p class="subtitle">Current working model from repository docs and source orientation. This is a learning scaffold, not a final conclusion.</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">OpenClaw: local-first assistant control plane</div>
+    <div class="mockup-body">
+      <div style="display:grid;gap:12px">
+        <div class="placeholder"><strong>Gateway daemon</strong><br>WebSocket RPC, channel adapters, node pairing, health, events</div>
+        <div class="placeholder"><strong>Session lanes</strong><br>Per-session serialization, queue modes, transcript write locks</div>
+        <div class="placeholder"><strong>Embedded Pi agent runtime</strong><br>Prompt assembly, model stream, tool execution, lifecycle events</div>
+        <div class="placeholder"><strong>Workspace memory</strong><br>Markdown memory files, memory-core search, dreaming, compaction flush</div>
+        <div class="placeholder"><strong>Plugins/hooks/nodes</strong><br>Provider plugins, tool hooks, mobile/macOS nodes, canvas/browser surfaces</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Hermes: self-improving agent runtime</div>
+    <div class="mockup-body">
+      <div style="display:grid;gap:12px">
+        <div class="placeholder"><strong>AIAgent loop</strong><br>Python tool loop, provider transports, context compressor, session history</div>
+        <div class="placeholder"><strong>Gateway + platforms</strong><br>Messaging platform adapters, routing, dynamic session context</div>
+        <div class="placeholder"><strong>MemoryManager</strong><br>Provider orchestration, prefetch, fenced memory context, sync after turn</div>
+        <div class="placeholder"><strong>Skill system + curator</strong><br>Skill creation, usage tracking, background review, archive/consolidate/patch</div>
+        <div class="placeholder"><strong>Cron/subagents/research</strong><br>Scheduled runs, isolated workstreams, benchmarks and trajectory generation</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>Three Study Layers</h3>
+  <div class="options" data-multiselect>
+    <div class="option selected" data-choice="principles" onclick="toggleSelect(this)">
+      <div class="letter">1</div>
+      <div class="content"><h3>Architecture principles</h3><p>Explain lifecycle, state, memory, scheduling, gateway, tools, and failure handling.</p></div>
+    </div>
+    <div class="option selected" data-choice="source" onclick="toggleSelect(this)">
+      <div class="letter">2</div>
+      <div class="content"><h3>Source reading guide</h3><p>Map each mechanism to key files, functions, and reading order.</p></div>
+    </div>
+    <div class="option selected" data-choice="minimal" onclick="toggleSelect(this)">
+      <div class="letter">3</div>
+      <div class="content"><h3>Minimal reproduction model</h3><p>Extract the smallest set of mechanisms needed to build a long-lived agent later.</p></div>
+    </div>
+  </div>
+</div>
