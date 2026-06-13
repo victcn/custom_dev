@@ -3,15 +3,17 @@
 > 参考版本：
 > - OpenClaw：`/code/openclaw@ca31a705d02e42ffcfb2c5884bb55339a6d0cbdc`
 > - Hermes Agent：`/code/hermes-agent@3d4297a59a8607ed24850524d229f5f42520d087`
+> - Codex / Claude Code：作为入口协议、CLI/SDK/MCP/tool-use、memory、skills、automation、subagents、hooks/failure policy 等机制的官方文档参照，不作为本小册子的逐章源码对照对象。
 
 ## 本章问题
 
-这套小册子不是 API 手册，而是“机制优先”的源码阅读材料：先问一个长生命周期 agent 机制解决什么问题，再看 OpenClaw 和 Hermes Agent 各自怎样落地，最后抽象出可复现的最小模型。这个写作目标、章节边界和证据规则来自本目录的设计规格：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`。
+这套小册子不是 API 手册，而是“机制优先”的源码阅读材料：先问一个长生命周期 agent 机制解决什么问题，再看 OpenClaw 和 Hermes Agent 各自怎样落地，最后抽象出可复现的最小模型。涉及入口、session、loop、memory、skills、automation、tools/MCP、subagents 或 failure policy 时，本小册子也会把 Codex 和 Claude Code 纳入官方文档参照，用来避免把所有 coding agent 都误归类为 OpenClaw 式 Gateway，或把 CLI/SDK/MCP/tool-use 这类 host surface 忽略掉。这个写作目标、章节边界和证据规则来自本目录的设计规格：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`。
 
 阅读时要区分三类表述：
 
 - 源码事实：直接由代码结构、类、函数或配置读取出来，例如 Hermes 的 `SessionSource`、`SessionContext` 和 `SessionStore` 位于 `/code/hermes-agent/gateway/session.py`。
 - 文档声明：项目 README 或 docs 明确说明的定位、能力或默认行为，例如 OpenClaw README 将 OpenClaw 定位为运行在用户设备上的 personal AI assistant，并列出 Gateway、channels、tools、skills 和 security defaults：`/code/openclaw/README.md`。
+- 官方文档参照：Codex 和 Claude Code 这类未纳入本地源码阅读的对象，只使用官方公开文档说明其入口、接口和协议边界，例如 Codex CLI 与 Claude Agent SDK/MCP 文档。
 - 学习抽象：为了学习和最小复现而做的归纳，例如“入口、会话、记忆、自动化、工具边界共同构成长生命周期 agent 的骨架”；它不是任一项目的逐字实现，依据来自本小册子设计规格 `/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`。
 
 ## OpenClaw 怎么做
@@ -41,7 +43,7 @@ Hermes 的入口阅读应从 `run_agent.py` 与 `gateway/` 并行开始。`run_a
 推荐顺序：
 
 1. 先读 `01-architecture-overview.md`，建立入口、状态、记忆、技能、自动化和 provider/plugin 的总图；章节依据包括 `/code/openclaw/README.md`、`/code/openclaw/docs/concepts/architecture.md`、`/code/openclaw/docs/concepts/agent.md`、`/code/hermes-agent/README.md`、`/code/hermes-agent/providers/README.md`。
-2. 再读 `02-gateway.md`，理解外部消息如何进入长驻进程、如何成为 session、如何再交给 agent loop；章节依据包括 `/code/openclaw/docs/gateway/protocol.md`、`/code/hermes-agent/gateway/run.py`、`/code/hermes-agent/gateway/session.py`。
+2. 再读 `02-gateway.md`，理解外部消息如何进入长驻进程、HTTP/API/Webhook/CLI/SDK/MCP 入口如何成为 session 或 run，以及如何再交给 agent loop；章节依据包括 `/code/openclaw/docs/gateway/protocol.md`、`/code/hermes-agent/gateway/run.py`、`/code/hermes-agent/gateway/session.py`，并补充 Codex CLI 与 Claude Agent SDK/MCP 官方文档参照。
 3. 然后读后续 `03-agent-loop.md`，把 Gateway 与 LLM/tool loop 接上；初始锚点是 `/code/openclaw/docs/concepts/agent-loop.md` 和 `/code/hermes-agent/run_agent.py`。
 4. 按需求跳读 `05-memory.md`、`06-skills.md`、`07-automation.md`：OpenClaw 起点分别是 `/code/openclaw/docs/concepts/memory.md`、`/code/openclaw/docs/tools/skills.md`、`/code/openclaw/docs/automation/cron-jobs.md`；Hermes 起点分别是 `/code/hermes-agent/agent/memory_manager.py`、`/code/hermes-agent/agent/curator.py`、`/code/hermes-agent/cron/scheduler.py`。
 
@@ -50,6 +52,7 @@ Hermes 的入口阅读应从 `run_agent.py` 与 `gateway/` 并行开始。`run_a
 | 术语 | 本小册子中的用法 | 起始锚点 |
 |---|---|---|
 | `Gateway` | 长驻入口/控制面，把平台消息、控制命令、路由和投递接到 agent | `/code/openclaw/docs/concepts/architecture.md`；`/code/hermes-agent/gateway/run.py` |
+| `MCP` | agent host 和外部工具/数据源之间的标准化扩展协议；在 Codex 和 Claude Code 中是重要集成面 | Codex CLI configuration/reference；Claude MCP connector 官方文档 |
 | `agent loop` | 组装上下文、调用模型、执行工具、生成输出、持久化状态的循环 | `/code/openclaw/docs/concepts/agent.md`；`/code/hermes-agent/run_agent.py` |
 | `session` | 稳定会话身份与 transcript/metadata 的组合 | `/code/openclaw/docs/concepts/agent.md`；`/code/hermes-agent/gateway/session.py` |
 | `memory` | 跨轮次或跨会话保留并召回的信息 | `/code/openclaw/docs/concepts/agent.md`；`/code/hermes-agent/README.md` |

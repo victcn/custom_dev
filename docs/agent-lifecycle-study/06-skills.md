@@ -3,6 +3,8 @@
 > 参考版本：
 > - OpenClaw：`/code/openclaw@ca31a705d02e42ffcfb2c5884bb55339a6d0cbdc`
 > - Hermes Agent：`/code/hermes-agent@3d4297a59a8607ed24850524d229f5f42520d087`
+> - Codex：OpenAI Codex manual，核验于 2026-06-13：`https://developers.openai.com/codex/codex-manual.md`
+> - Claude Code：Anthropic skills 官方文档，核验于 2026-06-13：`https://code.claude.com/docs/en/skills`
 
 ## 本章问题
 
@@ -64,6 +66,16 @@ Hermes curator 的职责包括按 skill activity timestamps 自动迁移 lifecyc
 
 Hermes 的生命周期状态是 `active`、`stale`、`archived`，另有 `pinned` 布尔标记；`apply_automatic_transitions()` 根据 `stale_after_days` 和 `archive_after_days` 把 agent-created skills 标为 stale、archive 或 reactivated。[源码事实；锚点：`/code/hermes-agent/tools/skill_usage.py:18`、`/code/hermes-agent/agent/curator.py:256`]
 
+## Codex / Claude Code 参考
+
+Codex manual 说明 Agent Skills 基于 open agent skills standard：skill 是包含 `SKILL.md` 的目录，必须有 `name` 和 `description`，可带 scripts/references；Codex 在 CLI、IDE extension 和 Codex app 中可用 skills，并用 progressive disclosure 控制上下文，启动时只放 metadata，选中后再读取完整 `SKILL.md`（官方文档：`https://developers.openai.com/codex/codex-manual.md` 的 `Agent Skills`）。
+
+Codex 的 skill roots 包括 repo `.agents/skills`、用户 `$HOME/.agents/skills`、admin `/etc/codex/skills` 和 system bundled skills；`~/.codex/config.toml` 的 `[[skills.config]]` 可按 `SKILL.md` path 禁用 skill。Codex 也把 plugins 作为可分发单元：skill 是 authoring format，plugin 是可安装 distribution unit，可同时携带 skills、MCP server 配置和 app integration（官方文档：`https://developers.openai.com/codex/codex-manual.md` 的 `Agent Skills`、`Plugins`）。
+
+Claude Code 的 skills 也使用 `SKILL.md`，并明确说 skills follow Agent Skills open standard，同时扩展了 invocation control、subagent execution 和 dynamic context injection。官方页列出 personal `~/.claude/skills`、project `.claude/skills`、enterprise 和 plugin skills；同名优先级是 enterprise > personal > project，plugin skills 用 `plugin-name:skill-name` namespace；Claude Code 还支持 live change detection（官方文档：`https://code.claude.com/docs/en/skills`）。
+
+把 Codex/Claude Code 加进本章后，学习结论可以更明确：`SKILL.md` 已经是跨 coding agent 的过程记忆格式，但加载根、优先级、热更新、命名空间、自动触发、工具预授权、subagent/fork 运行和插件分发仍是各 host 的产品决策，不能只看文件格式就假设行为一致。
+
 ## 异同点表
 
 | 维度 | OpenClaw | Hermes | 学习结论 |
@@ -74,6 +86,15 @@ Hermes 的生命周期状态是 `active`、`stale`、`archived`，另有 `pinned
 | Prompt 策略 | Eligible skills snapshot 进入 prompt；`disable-model-invocation` 可阻止普通 prompt 注入。[锚点：`/code/openclaw/docs/tools/skills.md:190`、`/code/openclaw/docs/tools/skills.md:397`] | `build_skills_system_prompt()` 生成 mandatory skills block，要求相关时先 `skill_view()`。[锚点：`/code/hermes-agent/agent/prompt_builder.py:1175`] | 不应把所有 skill 全量注入；更稳妥的是先索引，再按需查看全文。 |
 | 创建/更新 | Skill Workshop plugin 可创建/更新 workspace skills，默认 disabled。[锚点：`/code/openclaw/docs/tools/skills.md:106`] | `skill_manage()` 直接提供 create/edit/patch/delete/write_file/remove_file。[锚点：`/code/hermes-agent/tools/skill_manager_tool.py:713`] | 让 agent 写 skill 前应有明确权限边界和审计路径。 |
 | 生命周期维护 | 本章核实到 snapshot/watch/hot refresh 和 ClawHub install/update；未核实到类似 Hermes curator 的自动 stale/archive 生命周期。[锚点：`/code/openclaw/docs/tools/skills.md:397`、`/code/openclaw/docs/tools/skills.md:123`] | curator 根据 usage sidecar 和 inactivity gate 做 stale/archive/consolidation。[锚点：`/code/hermes-agent/agent/curator.py:1`、`/code/hermes-agent/tools/skill_usage.py:18`] | 自我改进 skill 的难点不在创建，而在长期维护、归档和去重。 |
+
+## Codex / Claude Code 参照表
+
+| 维度 | Codex | Claude Code | 学习结论 |
+| --- | --- | --- | --- |
+| 格式 | open agent skills standard，`SKILL.md` 必须有 `name`/`description`。 | 同样使用 `SKILL.md`，并支持额外 invocation/subagent/dynamic context 能力。 | 文件格式可共享，但 host 行为不能假设一致。 |
+| 加载根 | repo `.agents/skills`、`$HOME/.agents/skills`、`/etc/codex/skills`、system bundled。 | project `.claude/skills`、personal `~/.claude/skills`、enterprise、plugin skills。 | roots、优先级、同名冲突必须写进 registry 规则。 |
+| 触发方式 | explicit `$skill` 或 implicit description matching；可配置禁用 skill。 | 可显式或按 description 使用，并可运行在 subagent/fork 中。 | skill discovery 要有 metadata 预算和 invocation policy。 |
+| 分发 | plugin 是安装/分发单元，可携带 skills、MCP 和 app integration。 | plugin skills 有 namespace，enterprise/personal/project 有优先级。 | skill authoring folder 与 plugin distribution unit 应分开建模。 |
 
 ## 源码阅读路线
 
@@ -86,6 +107,8 @@ Hermes 的生命周期状态是 `active`、`stale`、`archived`，另有 `pinned
 7. Hermes write path：`/code/hermes-agent/tools/skill_manager_tool.py`，读 `_create_skill()`、`_patch_skill()` 和 `skill_manage()` schema。[锚点：`/code/hermes-agent/tools/skill_manager_tool.py:373`、`/code/hermes-agent/tools/skill_manager_tool.py:463`、`/code/hermes-agent/tools/skill_manager_tool.py:713`]
 8. Hermes lifecycle：`/code/hermes-agent/tools/skill_usage.py` 和 `/code/hermes-agent/agent/curator.py`，读 `.usage.json`、agent-created provenance、state transitions、curator prompt。[锚点：`/code/hermes-agent/tools/skill_usage.py:1`、`/code/hermes-agent/agent/curator.py:256`、`/code/hermes-agent/agent/curator.py:330`]
 9. Hermes hub：`/code/hermes-agent/tools/skills_hub.py`，读 `SkillSource`、hub state paths 和 lock/quarantine/audit 结构。[锚点：`/code/hermes-agent/tools/skills_hub.py:48`、`/code/hermes-agent/tools/skills_hub.py:294`]
+10. Codex 读 manual 的 `Agent Skills`、`Customization`、`Plugins`，确认 `.agents/skills`、`$HOME/.agents/skills`、`/etc/codex/skills`、progressive disclosure 和 plugin distribution。
+11. Claude Code 读 `https://code.claude.com/docs/en/skills`，确认 `.claude/skills`、live change detection、frontmatter、dynamic context injection、subagent/fork 和 plugin namespace。
 
 ## 最小复现抽象
 
@@ -96,6 +119,7 @@ Hermes 的生命周期状态是 `active`、`stale`、`archived`，另有 `pinned
 - `SkillUsageTracker`：记录 view/use/patch 次数和最近活动时间，作为维护任务的输入；Hermes 有 `.usage.json` 明确实现，OpenClaw 本章未核实到同等 sidecar。[学习抽象；锚点：`/code/hermes-agent/tools/skill_usage.py:120`、`/code/hermes-agent/tools/skill_usage.py:405`]
 - `SkillWriter`：创建、patch、写 supporting files、删除/归档 skill，并做 frontmatter/content/security validation；Hermes 的 `skill_manage()` 是直接样板，OpenClaw 的 Skill Workshop 是插件化写入入口。[学习抽象；锚点：`/code/hermes-agent/tools/skill_manager_tool.py:713`、`/code/openclaw/docs/tools/skills.md:106`]
 - `SkillCurator`：根据 inactivity、usage、staleness 和 umbrella consolidation 策略维护 agent-created skills；Hermes 有 curator 明确实现，OpenClaw 本章只抽象到 workshop/ClawHub/update，不写成有 curator。[学习抽象；锚点：`/code/hermes-agent/agent/curator.py:1`、`/code/openclaw/docs/tools/skills.md:123`]
+- `SkillDistributionUnit`：区分 skill authoring folder 和 plugin/marketplace 分发单元；Codex 与 Claude Code 都把 plugin 作为携带 skills、MCP、hooks 或 app/agent 配置的更大包。
 
 ## 容易误解的点
 
@@ -105,6 +129,8 @@ Hermes 的生命周期状态是 `active`、`stale`、`archived`，另有 `pinned
 - 不要把 Hermes memory 当作 procedures 的存放地；`MEMORY_GUIDANCE` 明确 procedures/workflows belong in skills。[锚点：`/code/hermes-agent/agent/prompt_builder.py:150`]
 - 不要把 Hermes curator 理解为会删除任意 skill；curator invariant 写明只 touching agent-created skills 且 never auto-deletes，只 archive。[锚点：`/code/hermes-agent/agent/curator.py:15`]
 - 不要把 `skill_manage(create)` 都视为 curator-managed；源码注释说明只有 background self-improvement review fork 创建的 skill 才会 `mark_agent_created()`，foreground create 属于 user-directed。[锚点：`/code/hermes-agent/tools/skill_manager_tool.py:771`]
+- 不要把 `SKILL.md` 格式一致等同于加载行为一致；Codex、Claude Code、OpenClaw、Hermes 的 roots、优先级、同名冲突、热更新和插件命名空间都不同。
+- 不要把 Codex/Claude Code 的 skills 和 `AGENTS.md`/`CLAUDE.md` 混用：长期规则适合 repo guidance，重复 workflow 才适合 skill。
 
 ## 待核实问题
 

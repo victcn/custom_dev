@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 写出一套中文机制优先小册子，准确对照 OpenClaw 和 Hermes Agent 的长生命周期 agent 原理、源码路径、异同点和最小复现抽象。
+**Goal:** 写出一套中文机制优先小册子，准确对照 OpenClaw 和 Hermes Agent 的长生命周期 agent 原理、源码路径、异同点和最小复现抽象，并把 Codex / Claude Code 作为官方文档参照纳入入口、SDK/MCP/tool-use、memory、skills、automation、subagents 和 failure policy 边界。
 
-**Architecture:** 小册子按机制拆章，每章固定包含问题、OpenClaw 做法、Hermes 做法、异同点、源码阅读路线、最小复现抽象、误解点和待核实问题。所有事实性结论必须附源码或文档锚点；抽象性归纳必须明确标注为学习抽象。
+**Architecture:** 小册子按机制拆章，每章固定包含问题、OpenClaw 做法、Hermes 做法、Codex/Claude Code 官方参照、异同点、参照表、源码阅读路线、最小复现抽象、误解点和待核实问题。所有事实性结论必须附源码或文档锚点；抽象性归纳必须明确标注为学习抽象。
 
 **Tech Stack:** Markdown 文档、`rg`/`sed`/`find` 源码检索、Git commit 引用、中文教程写作。
 
@@ -17,7 +17,7 @@
 - 创建：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/00-reading-guide.md`
   - 阅读方法、版本、术语、推荐顺序。
 - 创建：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/01-architecture-overview.md`
-  - 总体架构与两项目定位差异。
+  - 总体架构、OpenClaw/Hermes 定位差异，以及 Codex/Claude Code 入口/扩展面参照。
 - 创建：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/02-gateway.md`
   - Gateway 机制专章。
 - 创建：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/03-agent-loop.md`
@@ -37,7 +37,7 @@
 - 创建：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/10-failure-modes.md`
   - 失败模式与恢复机制。
 - 创建：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/11-minimal-reproduction.md`
-  - 从两者抽象出的最小长生命周期 agent 模型。
+  - 从 OpenClaw/Hermes 源码事实和 Codex/Claude Code 官方参照中抽象出的最小长生命周期 agent 模型。
 
 ## 通用章节模板
 
@@ -49,6 +49,7 @@
 > 参考版本：
 > - OpenClaw：`/code/openclaw@ca31a705d02e42ffcfb2c5884bb55339a6d0cbdc`
 > - Hermes Agent：`/code/hermes-agent@3d4297a59a8607ed24850524d229f5f42520d087`
+> - Codex / Claude Code：按章节需要列出官方文档参照。
 
 ## 本章问题
 
@@ -56,7 +57,11 @@
 
 ## Hermes 怎么做
 
+## Codex / Claude Code 参考
+
 ## 异同点表
+
+## Codex / Claude Code 参照表
 
 ## 源码阅读路线
 
@@ -512,7 +517,7 @@ Expected: 能提取两项目关于 timeout、retry、sandbox/security、prompt i
 - Queue/Lane
 - FailureRecovery
 
-第三层：接近 OpenClaw/Hermes 的高级能力
+第三层：接近 OpenClaw/Hermes，并吸收 Codex/Claude Code 外部参照的高级能力
 - Plugin/Hook system
 - Skill curator
 - Multi-agent routing/delegation
@@ -520,7 +525,7 @@ Expected: 能提取两项目关于 timeout、retry、sandbox/security、prompt i
 - Provider registry/failover
 ```
 
-必须说明这些是学习抽象，不代表 OpenClaw 或 Hermes 精确实现。
+必须说明这些是学习抽象，不代表 OpenClaw、Hermes、Codex 或 Claude Code 的精确实现。
 
 - [ ] **Step 4: 验证最小复现章节的边界声明**
 
@@ -571,7 +576,7 @@ for f in /code/code-dev/agent_dev/docs/agent-lifecycle-study/{00-reading-guide,0
 done
 ```
 
-Expected: 每章都至少有 OpenClaw 和 Hermes 的源码或文档路径。
+Expected: 每章都至少有 OpenClaw 和 Hermes 的源码或文档路径；涉及入口、loop、session、memory、skills、automation、tools/MCP、subagents、failure policy 或最小复现的章节，还要有 Codex / Claude Code 官方文档参照。
 
 - [ ] **Step 4: 检查语言要求**
 

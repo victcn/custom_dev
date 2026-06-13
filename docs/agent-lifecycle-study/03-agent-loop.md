@@ -3,6 +3,8 @@
 > 参考版本：
 > - OpenClaw：`/code/openclaw@ca31a705d02e42ffcfb2c5884bb55339a6d0cbdc`
 > - Hermes Agent：`/code/hermes-agent@3d4297a59a8607ed24850524d229f5f42520d087`
+> - Codex：OpenAI Codex manual，核验于 2026-06-13：`https://developers.openai.com/codex/codex-manual.md`
+> - Claude Code：Anthropic Agent SDK 官方文档，核验于 2026-06-13：`https://code.claude.com/docs/en/agent-sdk/agent-loop`
 
 ## 本章问题
 
@@ -46,6 +48,16 @@ Hermes 的 final response 在没有 tool calls 的分支产生：`assistant_mess
 
 Hermes 在 loop 结束后调用 `_persist_session(messages, conversation_history)`，该函数写 JSON session log，并通过 `_flush_messages_to_session_db` 把未写过的新消息追加到 SQLite session store；返回值包含 `final_response`、`last_reasoning`、`messages`、`api_calls`、`completed`、`turn_exit_reason`、`interrupted` 等字段（源码事实：`/code/hermes-agent/run_agent.py` 的 `_persist_session`、`_flush_messages_to_session_db`、`run_conversation` 返回结果构造）。
 
+## Codex / Claude Code 参考
+
+Codex 的 agent loop 主要由 Codex host 暴露，而不是一个默认公开的 Gateway loop。Codex SDK 文档说明 TypeScript SDK 可以 `startThread()` 后 `thread.run(...)`，Python SDK 通过本地 Codex app-server 的 JSON-RPC 控制 Codex，并支持对同一 thread 继续运行或 resume 既有 thread；这对应“宿主程序调用 run/turn”的接口，而不是 OpenClaw 的 `agent`/`agent.wait` RPC（官方文档：`https://developers.openai.com/codex/codex-manual.md` 的 `Codex SDK`、`Codex App Server`）。
+
+Codex loop 的上下文进入方式还包括 `AGENTS.md`、skills、memories、MCP、hooks 和 subagents。Codex manual 把 customization 分成 project guidance、memories、skills、MCP、subagents，并说明 skills 采用 progressive disclosure：启动时只给 metadata，选中后再读完整 `SKILL.md`（官方文档：`https://developers.openai.com/codex/codex-manual.md` 的 `Customization`、`Agent Skills`）。
+
+Claude Agent SDK 明确把 Claude Code 的工具、agent loop 和 context management 暴露给 Python/TypeScript 宿主程序；一次 session 的循环是 Claude 评估 prompt、请求工具、接收 tool result、继续评估直到完成。它还把 `query()` 的 message stream、tool permissions、turn/budget、context window、automatic compaction、session continuity 和 hooks 写成 SDK 层概念（官方文档：`https://code.claude.com/docs/en/agent-sdk/agent-loop`）。
+
+因此外部产品参考的重点是“host loop vs gateway loop”：Codex/Claude Code 可以通过 CLI/SDK/headless 模式被宿主程序驱动，但具体排队、HTTP 化、SSE/WS 转发、跨租户权限、delivery target 通常由宿主或产品 surface 负责。不要把 SDK 提供的 agent loop 自动等同为 OpenClaw 的 WebSocket Gateway，也不要把 Claude API tool-use loop 等同为 Claude Code/Agent SDK 的内置工具执行 loop。
+
 ## 异同点表
 
 | 维度 | OpenClaw | Hermes | 学习结论 |
@@ -57,6 +69,15 @@ Hermes 在 loop 结束后调用 `_persist_session(messages, conversation_history
 | streaming | assistant/tool/lifecycle stream 是正式 agent event stream（`/code/openclaw/docs/concepts/agent-loop.md`）。 | streaming 走 `_interruptible_streaming_api_call`，并通过 callbacks/stream_delta 交给调用方（`/code/hermes-agent/run_agent.py`）。 | OpenClaw 的 stream 是 run 级 event bus；Hermes 的 stream 是 `AIAgent` 内部 API 调用和 UI callback 的一部分。 |
 | context compression | 文档声明 auto-compaction 会发 `compaction` stream events 并可能 retry（`/code/openclaw/docs/concepts/agent-loop.md`）。 | `run_conversation` preflight 和 tool loop 后都会调用 `_compress_context`，compression 后重置 `conversation_history`（`/code/hermes-agent/run_agent.py`）。 | 两者都有压缩，但 OpenClaw 文档以事件和 retry 描述，Hermes 代码以 message 列表重写和 DB flush 边界体现。 |
 
+## Codex / Claude Code 参照表
+
+| 维度 | Codex | Claude Code | 学习结论 |
+|---|---|---|---|
+| loop 暴露方式 | SDK thread/run、CLI、local app-server 暴露宿主可调用入口；不是默认公开 Gateway。 | Agent SDK 暴露 Claude Code 风格 agent loop、tools 和 context management。 | SDK/CLI host loop 可以被服务化，但队列、租户和 delivery 仍是宿主责任。 |
+| 上下文来源 | `AGENTS.md`、skills、memories、MCP、hooks、subagents 都可影响 loop。 | session history、tool results、hooks、permissions、context window 和 compaction 是 SDK loop 概念。 | agent loop 不只是模型调用；context assembly 和 tool result 回流必须是显式边界。 |
+| tool loop | Codex host 通过本地工具、MCP 和 app-server/SDK surface 执行动作。 | Agent SDK loop 会处理 tool request/result 往返；Claude API tool use 则由应用执行工具。 | 区分“agent host 执行工具”和“模型 API 请求工具”两种闭环。 |
+| streaming/final | SDK/app-server/CLI 由 host 决定如何向调用方返回中间事件和最终结果。 | SDK message stream 可由宿主消费并转发。 | 流式事件不是天然等于 Gateway event bus，需要外层协议适配。 |
+
 ## 源码阅读路线
 
 1. 先读 OpenClaw 生命周期说明：`/code/openclaw/docs/concepts/agent-loop.md`，重点看 `How it works`、`Queueing + concurrency`、`Event streams (today)`。
@@ -66,6 +87,8 @@ Hermes 在 loop 结束后调用 `_persist_session(messages, conversation_history
 5. 读 Hermes prompt：`/code/hermes-agent/run_agent.py` 的 `_build_system_prompt`。
 6. 读 Hermes 主循环：`/code/hermes-agent/run_agent.py` 的 `run_conversation`，从 `messages = list(conversation_history)` 读到返回 result。
 7. 读 Hermes tool 执行：`/code/hermes-agent/run_agent.py` 的 `_execute_tool_calls`、`_invoke_tool`、`_execute_tool_calls_sequential`、`_execute_tool_calls_concurrent`。
+8. 读 Codex manual 的 `Codex SDK`、`Codex App Server`、`Customization`、`Agent Skills`、`Hooks`、`Memories`，确认 Codex host 怎样暴露 thread/run、context、hooks 和 tools。
+9. 读 Claude Agent SDK 的 `How the agent loop works`、`Work with sessions`、`Configure permissions`、`Stream responses in real-time`，确认 SDK loop、session 和 permission callback 的边界。
 
 ## 最小复现抽象
 
@@ -77,6 +100,7 @@ Hermes 在 loop 结束后调用 `_persist_session(messages, conversation_history
 - `ToolExecutor`：接收 tool calls，执行工具，生成 role=`tool` 或 stream tool event；参考 Hermes `_execute_tool_calls` 和 OpenClaw `subscribeEmbeddedPiSession` 的 tool stream。
 - `StreamEmitter`：统一发送 assistant delta、tool progress、lifecycle start/end/error、compaction events；参考 OpenClaw `stream: "assistant"|"tool"|"lifecycle"` 和 Hermes callbacks。
 - `RunFinalizer`：清理临时 scaffolding、写 transcript/session DB、计算 usage、返回 final response；参考 Hermes `_persist_session` 和 OpenClaw agent-loop 文档的 persistence/final payload 描述。
+- `HostLoopAdapter`：把 CLI/SDK/app-server 的 thread/run 调用包成内部 `AgentRun`；参考 Codex SDK thread/run 与 Claude Agent SDK `query()`，但不要把它写成固定网络协议。
 
 ## 容易误解的点
 
@@ -84,6 +108,8 @@ Hermes 在 loop 结束后调用 `_persist_session(messages, conversation_history
 - 不要把 Hermes 的 `api_messages` 当成持久化 transcript；代码注释说明 memory/plugin/prefill/ephemeral system prompt 注入是 API-call-time only，原始 `messages` 不被这些注入污染（`/code/hermes-agent/run_agent.py`）。
 - 不要把 tool event 和 tool result 混为一谈；OpenClaw 暴露 tool stream event，Hermes 把 tool result 写入 message list 的 role=`tool` 项，两者的外形不同（`/code/openclaw/src/agents/pi-embedded-subscribe.ts`，`/code/hermes-agent/run_agent.py`）。
 - 不要假设 compression 只是“摘要一下文本”；Hermes compression 会影响 session 写入边界，代码在 compression 后把 `conversation_history` 置空以保证压缩后的消息完整写入新 session（`/code/hermes-agent/run_agent.py`）。
+- 不要把 Codex/Claude Code SDK 的 `run()`/`query()` 当成完整 Gateway；它们暴露 agent loop 能力，但外层的队列、租户、HTTP/SSE/WS 转发和 delivery target 仍要由宿主系统设计。
+- 不要把 Claude API 的普通 tool use 和 Claude Agent SDK 的内置工具执行 loop 混为一谈；前者通常由应用自己执行工具并回传 tool result，后者把 Claude Code 风格的工具执行和上下文管理封装进 SDK。
 
 ## 待核实问题
 

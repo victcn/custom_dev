@@ -3,12 +3,13 @@
 > 参考版本：
 > - OpenClaw：`/code/openclaw@ca31a705d02e42ffcfb2c5884bb55339a6d0cbdc`
 > - Hermes Agent：`/code/hermes-agent@3d4297a59a8607ed24850524d229f5f42520d087`
+> - Codex / Claude Code：作为入口、SDK/MCP/tool-use、memory、skills、automation、subagents、hooks/failure policy surface 的官方文档参照。
 
-> 重要说明：本章是学习抽象，不代表 OpenClaw 或 Hermes Agent 的精确实现。它把前面章节的机制边界和本地已核验源码/文档锚点压缩成一个可复现的学习模型，用来理解“长期运行 agent 至少需要哪些层”。锚点：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`、`/code/code-dev/agent_dev/docs/agent-lifecycle-study/implementation-plan.md`。
+> 重要说明：本章是学习抽象，不代表 OpenClaw、Hermes Agent、Codex 或 Claude Code 的精确实现。它把前面章节的机制边界和本地已核验源码/文档锚点压缩成一个可复现的学习模型，用来理解“长期运行 agent 至少需要哪些层”。锚点：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`、`/code/code-dev/agent_dev/docs/agent-lifecycle-study/implementation-plan.md`。
 
 ## 本章问题
 
-如果只想学习长生命周期 agent，最容易犯的错误是直接复制某个项目的目录结构。更稳妥的方式是先抽象出三层：第一层让 agent 能长期入口化、会话化、工具化、可记录；第二层加入长期记忆、调度、队列和失败恢复；第三层再靠近 OpenClaw/Hermes 的高级能力，例如插件、skill curator、多 agent 委派、沙箱 workspace 和 provider failover。这个三层划分是学习抽象，依据来自章节边界和已核验锚点。锚点：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`、`/code/openclaw/docs/concepts/architecture.md`、`/code/openclaw/docs/concepts/agent-loop.md`、`/code/openclaw/docs/concepts/agent.md`、`/code/openclaw/docs/concepts/queue.md`、`/code/openclaw/docs/concepts/memory.md`、`/code/hermes-agent/run_agent.py`、`/code/hermes-agent/agent/memory_manager.py`、`/code/hermes-agent/cron/scheduler.py`、`/code/hermes-agent/providers/README.md`。
+如果只想学习长生命周期 agent，最容易犯的错误是直接复制某个项目的目录结构。更稳妥的方式是先抽象出三层：第一层让 agent 能入口化、会话化、工具化、可记录；第二层加入长期记忆、调度、队列和失败恢复；第三层再靠近 OpenClaw/Hermes/Codex/Claude Code 这些系统体现出的高级能力，例如插件、MCP、skill curator、多 agent 委派、沙箱 workspace 和 provider failover。这个三层划分是学习抽象，依据来自章节边界和已核验锚点。锚点：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`、`/code/openclaw/docs/concepts/architecture.md`、`/code/openclaw/docs/concepts/agent-loop.md`、`/code/openclaw/docs/concepts/agent.md`、`/code/openclaw/docs/concepts/queue.md`、`/code/openclaw/docs/concepts/memory.md`、`/code/hermes-agent/run_agent.py`、`/code/hermes-agent/agent/memory_manager.py`、`/code/hermes-agent/cron/scheduler.py`、`/code/hermes-agent/providers/README.md`。
 
 ## OpenClaw 怎么做
 
@@ -38,22 +39,28 @@ Hermes 的 provider registry 使用 `ProviderProfile`，下游 auth、model list
 
 Hermes README 声明它支持 persistent memory、skill 自我改进、cron scheduling、subagents/parallel workstreams 和多种 terminal backends；本章只把这些作为高级层学习抽象的证据，不展开实现细节。锚点：`/code/hermes-agent/README.md`、`/code/hermes-agent/README.zh-CN.md`。
 
+## Codex / Claude Code 参照
+
+Codex 和 Claude Code 对最小复现的启发是：入口层不一定要先实现一个 Gateway daemon。Codex CLI/app-server/MCP、Claude Code Agent SDK/API/MCP 都说明，一个 coding agent host 可以先从 CLI、SDK call、MCP request 或 local app-server transport 接受任务，再逐步补上 session、workspace、tool bridge 和 streaming。锚点见 `02-gateway.md` 与 `08-tools-plugins.md`。
+
+MCP 对第三层扩展尤其重要。OpenClaw/Hermes 的本地证据更偏 plugin、registry、provider、skill；Codex/Claude Code 参照提醒我们，跨工具生态时可以把外部能力做成 MCP server，而不是强行塞进某个项目私有插件系统。Claude API tool use 则提醒我们，模型 API 的 tool-call contract 与 MCP 这种工具协议要分层建模。
+
 ## 异同点表
 
-| 维度 | OpenClaw | Hermes | 学习结论 |
-|---|---|---|---|
-| 长期入口 | long-lived `Gateway` 拥有 messaging surfaces 和 WebSocket 控制面。锚点：`/code/openclaw/docs/concepts/architecture.md` | CLI/gateway/cron 最终围绕 `AIAgent.run_conversation()` 运行。锚点：`/code/hermes-agent/run_agent.py`、`/code/hermes-agent/cron/scheduler.py` | 最小复现需要一个入口层，但入口形态可以是 daemon、CLI 或 scheduler。 |
-| 会话与 transcript | session transcript 为 JSONL，路径由 OpenClaw 管理。锚点：`/code/openclaw/docs/concepts/agent.md` | 本章未核实 Hermes session DB/transcript 的完整结构，只核实 `run_conversation()` 会持久化 session。锚点：`/code/hermes-agent/run_agent.py` | 学习模型应保留 `SessionStore` 和 `TranscriptStore` 两个边界。 |
-| agent loop | 明确定义 intake → context → model → tools → streaming → persistence。锚点：`/code/openclaw/docs/concepts/agent-loop.md` | `AIAgent` 包含 tool calling loop、API retry、tool call validation 和 persistence。锚点：`/code/hermes-agent/run_agent.py` | `AgentLoop` 是第一层核心，不应和 Gateway、memory、scheduler 混成一个概念。 |
-| 记忆 | Markdown memory files + memory provider tools。锚点：`/code/openclaw/docs/concepts/memory.md` | `MemoryManager` 统一 provider、prompt、prefetch、sync。锚点：`/code/hermes-agent/agent/memory_manager.py` | 第二层需要 `MemoryStore` 和 `MemoryRetriever`，具体后端可替换。 |
-| 队列/lane | lane-aware FIFO，session lane + global lane。锚点：`/code/openclaw/docs/concepts/queue.md` | README 声明 subagents/parallel workstreams；cron scheduler 使用 worker thread 运行 job。锚点：`/code/hermes-agent/README.md`、`/code/hermes-agent/cron/scheduler.py` | 显式 `Queue/Lane` 是本章的学习抽象要求，不表示已核实 Hermes 有 OpenClaw 等价 lane；没有并发边界时，会话和工具状态更容易被污染。 |
-| 调度与投递 | cron 文档声明 Gateway 内置 scheduler，heartbeat 文档说明周期性主会话 turn；commitments 源码提供 inferred follow-up store。锚点：`/code/openclaw/docs/automation/cron-jobs.md`、`/code/openclaw/docs/gateway/heartbeat.md`、`/code/openclaw/src/commitments/store.ts` | cron scheduler 解析 delivery targets，组装 prompt 后运行 agent。锚点：`/code/hermes-agent/cron/scheduler.py` | 第二层最小复现应包含 `Scheduler` 和 `DeliveryTarget`。 |
-| 插件/provider | OpenClaw agent loop 文档列出 internal hooks 和 plugin hooks。锚点：`/code/openclaw/docs/concepts/agent-loop.md` | `ProviderProfile` registry 驱动 provider 能力。锚点：`/code/hermes-agent/providers/README.md` | 第三层才加入 hook/plugin/provider registry，避免第一版过度复杂。 |
-| 沙箱 workspace | OpenClaw sandbox 可配置 mode/scope/backend，工具执行可进 sandbox。锚点：`/code/openclaw/docs/gateway/sandboxing.md` | README 声明多 terminal backends，包括 Docker/SSH/Modal/Daytona/Vercel Sandbox。锚点：`/code/hermes-agent/README.md` | 沙箱是高级能力，但接口要尽早抽象为 workspace boundary。 |
+| 维度 | OpenClaw | Hermes | Codex / Claude Code 参照 | 学习结论 |
+|---|---|---|---|---|
+| 长期入口 | long-lived `Gateway` 拥有 messaging surfaces 和 WebSocket 控制面。锚点：`/code/openclaw/docs/concepts/architecture.md` | CLI/gateway/cron/API/webhook 最终围绕 `AIAgent.run_conversation()` 运行。锚点：`/code/hermes-agent/run_agent.py`、`/code/hermes-agent/cron/scheduler.py`、`/code/hermes-agent/gateway/platforms/api_server.py` | CLI、SDK、MCP、local app-server/API 都可以是入口。 | 最小复现需要一个 `IngressSurface`，但入口形态可以是 daemon、CLI、HTTP、SDK 或 MCP。 |
+| 会话与 transcript | session transcript 为 JSONL，路径由 OpenClaw 管理。锚点：`/code/openclaw/docs/concepts/agent.md` | 本章未核实 Hermes session DB/transcript 的完整结构，只核实 `run_conversation()` 会持久化 session。锚点：`/code/hermes-agent/run_agent.py` | CLI/SDK/MCP host 也需要决定会话边界和 transcript 归属。 | 学习模型应保留 `SessionStore` 和 `TranscriptStore` 两个边界。 |
+| agent loop | 明确定义 intake → context → model → tools → streaming → persistence。锚点：`/code/openclaw/docs/concepts/agent-loop.md` | `AIAgent` 包含 tool calling loop、API retry、tool call validation 和 persistence。锚点：`/code/hermes-agent/run_agent.py` | Claude Agent SDK 明确把 agent loop/context management 暴露给宿主程序；Codex CLI 由本地 host 驱动 loop。 | `AgentLoop` 是第一层核心，不应和 Gateway、memory、scheduler 混成一个概念。 |
+| 记忆 | Markdown memory files + memory provider tools。锚点：`/code/openclaw/docs/concepts/memory.md` | `MemoryManager` 统一 provider、prompt、prefetch、sync。锚点：`/code/hermes-agent/agent/memory_manager.py` | 本章只把 repo guidance、context management、MCP data source 当参照，不写成长期记忆事实。 | 第二层需要 `MemoryStore` 和 `MemoryRetriever`，具体后端可替换。 |
+| 队列/lane | lane-aware FIFO，session lane + global lane。锚点：`/code/openclaw/docs/concepts/queue.md` | README 声明 subagents/parallel workstreams；cron scheduler 使用 worker thread 运行 job。锚点：`/code/hermes-agent/README.md`、`/code/hermes-agent/cron/scheduler.py` | CLI/SDK 服务化后同样需要 run queue、cancel 和并发隔离，但具体实现由宿主决定。 | 显式 `Queue/Lane` 是本章的学习抽象要求，不表示已核实 Hermes 有 OpenClaw 等价 lane；没有并发边界时，会话和工具状态更容易被污染。 |
+| 调度与投递 | cron 文档声明 Gateway 内置 scheduler，heartbeat 文档说明周期性主会话 turn；commitments 源码提供 inferred follow-up store。锚点：`/code/openclaw/docs/automation/cron-jobs.md`、`/code/openclaw/docs/gateway/heartbeat.md`、`/code/openclaw/src/commitments/store.ts` | cron scheduler 解析 delivery targets，组装 prompt 后运行 agent。锚点：`/code/hermes-agent/cron/scheduler.py` | Codex/Claude Code 自动化通常由外部宿主、CI、SDK 服务或 MCP 周边系统触发。 | 第二层最小复现应包含 `Scheduler` 和 `DeliveryTarget`。 |
+| 插件/provider/协议扩展 | OpenClaw agent loop 文档列出 internal hooks 和 plugin hooks。锚点：`/code/openclaw/docs/concepts/agent-loop.md` | `ProviderProfile` registry 驱动 provider 能力。锚点：`/code/hermes-agent/providers/README.md` | MCP 与 API tool use 是跨系统扩展参照。 | 第三层才加入 hook/plugin/provider/MCP bridge，避免第一版过度复杂。 |
+| 沙箱 workspace | OpenClaw sandbox 可配置 mode/scope/backend，工具执行可进 sandbox。锚点：`/code/openclaw/docs/gateway/sandboxing.md` | README 声明多 terminal backends，包括 Docker/SSH/Modal/Daytona/Vercel Sandbox。锚点：`/code/hermes-agent/README.md` | Coding-agent host 需要明确 workspace、filesystem 和 command execution 权限。 | 沙箱是高级能力，但接口要尽早抽象为 workspace boundary。 |
 
 ## 源码阅读路线
 
-1. 第一层入口：读 `/code/openclaw/docs/concepts/architecture.md`，再读 `/code/hermes-agent/run_agent.py::AIAgent` 和 `run_conversation()`。
+1. 第一层入口：读 `/code/openclaw/docs/concepts/architecture.md`，再读 `/code/hermes-agent/run_agent.py::AIAgent` 和 `run_conversation()`；协议参照回到 `02-gateway.md` 的 Codex/Claude Code 小节。
 2. 第一层会话：读 `/code/openclaw/docs/concepts/agent.md` 的 `Sessions`，再在 `/code/hermes-agent/run_agent.py` 搜索 `_persist_session`、`session_id`、`conversation_history`。
 3. 第一层 loop：读 `/code/openclaw/docs/concepts/agent-loop.md` 的 high-level steps，再读 `/code/hermes-agent/run_agent.py` 的 tool call validation、API retry、final response 分支。
 4. 第二层 memory：读 `/code/openclaw/docs/concepts/memory.md`，再读 `/code/hermes-agent/agent/memory_manager.py`。
@@ -74,6 +81,12 @@ class Gateway:
 class CLI:
     def run_once(self, text: str) -> None: ...
 
+class SDKServer:
+    def submit(self, request: dict) -> str: ...
+
+class MCPServer:
+    def call_tool(self, name: str, args: dict) -> dict: ...
+
 class SessionStore:
     def resolve(self, source) -> str: ...
     def load(self, session_id: str) -> list[dict]: ...
@@ -89,7 +102,7 @@ class AgentLoop:
     def run(self, session_id: str, user_message: str) -> dict: ...
 ```
 
-第一层只要求能从 Gateway/CLI 入口进入，解析 session，加载 transcript，组装 prompt，调用模型，执行工具，把 assistant/tool/lifecycle 事件写回 `TranscriptStore`。这个抽象对应 OpenClaw 的 Gateway + agent loop + session transcript，也对应 Hermes 的 `AIAgent.run_conversation()`。锚点：`/code/openclaw/docs/concepts/architecture.md`、`/code/openclaw/docs/concepts/agent-loop.md`、`/code/openclaw/docs/concepts/agent.md`、`/code/hermes-agent/run_agent.py`。
+第一层只要求能从某个入口进入：Gateway、CLI、HTTP/API、SDK call 或 MCP request 都可以。它要解析 session，加载 transcript，组装 prompt，调用模型，执行工具，把 assistant/tool/lifecycle 事件写回 `TranscriptStore`。这个抽象对应 OpenClaw 的 Gateway + agent loop + session transcript，也对应 Hermes 的 `AIAgent.run_conversation()`；Codex/Claude Code 参照说明入口可以由 CLI/SDK/MCP host 承担。锚点：`/code/openclaw/docs/concepts/architecture.md`、`/code/openclaw/docs/concepts/agent-loop.md`、`/code/openclaw/docs/concepts/agent.md`、`/code/hermes-agent/run_agent.py`。
 
 第二层：真正长生命周期能力。
 
@@ -117,7 +130,7 @@ class FailureRecovery:
 
 第二层把“能聊天”升级为“能长期运行”：memory 让跨会话事实可召回；scheduler 让 agent 无人值守运行；delivery target 让结果回到用户所在平台；queue/lane 避免同一 session 并发写 transcript；failure recovery 处理 timeout、retry、interrupt、stuck diagnostics。锚点：`/code/openclaw/docs/concepts/memory.md`、`/code/openclaw/docs/concepts/queue.md`、`/code/openclaw/docs/concepts/retry.md`、`/code/hermes-agent/agent/memory_manager.py`、`/code/hermes-agent/cron/scheduler.py`、`/code/hermes-agent/run_agent.py`。
 
-第三层：接近 OpenClaw/Hermes 的高级能力。
+第三层：接近 OpenClaw/Hermes/Codex/Claude Code 的高级能力。
 
 ```python
 class PluginManager:
@@ -133,20 +146,25 @@ class MultiAgentRouter:
 class SandboxedWorkspace:
     def open(self, session_id: str) -> str: ...
 
+class MCPBridge:
+    def list_tools(self) -> list[dict]: ...
+    def invoke(self, server: str, tool: str, args: dict) -> dict: ...
+
 class ProviderRegistry:
     def resolve(self, requested: str, model: str) -> dict: ...
     def fallback(self, error: Exception) -> dict | None: ...
 ```
 
-第三层引入 extension surface 和隔离：plugin/hook system 允许在 prompt、tool、message、session lifecycle 上插入策略；skill curator 让过程记忆可维护；multi-agent routing/delegation 让任务拆到不同 agent/workspace；sandboxed workspaces 降低工具执行 blast radius；provider registry/failover 把模型供应商差异从 agent loop 中隔离出来。锚点：`/code/openclaw/docs/concepts/agent-loop.md`、`/code/openclaw/docs/gateway/sandboxing.md`、`/code/hermes-agent/agent/prompt_builder.py`、`/code/hermes-agent/README.md`、`/code/hermes-agent/providers/README.md`、`/code/hermes-agent/run_agent.py`。
+第三层引入 extension surface 和隔离：plugin/hook system 允许在 prompt、tool、message、session lifecycle 上插入策略；MCP bridge 允许把外部工具/数据源作为协议服务接进来；skill curator 让过程记忆可维护；multi-agent routing/delegation 让任务拆到不同 agent/workspace；sandboxed workspaces 降低工具执行 blast radius；provider registry/failover 把模型供应商差异从 agent loop 中隔离出来。锚点：`/code/openclaw/docs/concepts/agent-loop.md`、`/code/openclaw/docs/gateway/sandboxing.md`、`/code/hermes-agent/agent/prompt_builder.py`、`/code/hermes-agent/README.md`、`/code/hermes-agent/providers/README.md`、`/code/hermes-agent/run_agent.py`。
 
 ## 容易误解的点
 
-- 本章不是实现计划；`Gateway`、`SessionStore`、`AgentLoop` 等类名是学习抽象，不是要求 OpenClaw/Hermes 必须存在同名类。锚点：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`。
+- 本章不是实现计划；`Gateway`、`SessionStore`、`AgentLoop` 等类名是学习抽象，不是要求 OpenClaw/Hermes/Codex/Claude Code 必须存在同名类。锚点：`/code/code-dev/agent_dev/docs/agent-lifecycle-study/design.md`。
 - “最小可运行”不等于“长生命周期”；没有 memory、scheduler、queue/lane、failure recovery，只能算第一层。锚点：`/code/openclaw/docs/concepts/queue.md`、`/code/openclaw/docs/concepts/memory.md`、`/code/hermes-agent/cron/scheduler.py`。
 - “有沙箱”不等于“绝对安全”；OpenClaw sandboxing 文档明确说它不是完美安全边界。锚点：`/code/openclaw/docs/gateway/sandboxing.md`。
 - provider registry 不只是模型列表；Hermes 文档说明 auth、transport kwargs、model listing、runtime routing 都读取 `ProviderProfile`。锚点：`/code/hermes-agent/providers/README.md`。
-- memory 不应被混同为 prompt 里的任意长文本；OpenClaw 把 durable memory、daily notes、dreaming 分开，Hermes 用 fenced memory context 标记召回记忆。锚点：`/code/openclaw/docs/concepts/memory.md`、`/code/hermes-agent/agent/memory_manager.py`。
+- memory 不应被混同为 prompt 里的任意长文本。Hermes 用 fenced memory context 标记召回记忆；OpenClaw 把 durable memory、daily notes、dreaming 分开。锚点：`/code/openclaw/docs/concepts/memory.md`、`/code/hermes-agent/agent/memory_manager.py`。
+- MCP 不应被混同为模型 API 或 provider registry。它属于第三层工具/数据扩展协议，应该通过 `MCPBridge` 或等价边界接入，而不是塞进 `ProviderRegistry`。
 
 ## 待核实问题
 

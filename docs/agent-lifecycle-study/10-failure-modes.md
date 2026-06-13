@@ -3,6 +3,8 @@
 > 参考版本：
 > - OpenClaw：`/code/openclaw@ca31a705d02e42ffcfb2c5884bb55339a6d0cbdc`
 > - Hermes Agent：`/code/hermes-agent@3d4297a59a8607ed24850524d229f5f42520d087`
+> - Codex：OpenAI Codex manual，核验于 2026-06-13：`https://developers.openai.com/codex/codex-manual.md`
+> - Claude Code：Anthropic hooks/security/scheduled tasks 官方文档，核验于 2026-06-13：`https://code.claude.com/docs/en/hooks`；`https://code.claude.com/docs/en/scheduled-tasks`
 
 ## 本章问题
 
@@ -48,6 +50,16 @@ Hermes 的 cron scheduler 在 `_build_effective_prompt` 中先拼接 cron guidan
 
 Hermes 的 cron timeout 是 inactivity-based timeout：默认读取 `HERMES_CRON_TIMEOUT`，未配置时 600 秒，`0` 表示 unlimited；scheduler 把 `agent.run_conversation(prompt)` 放入 worker thread，每 5 秒检查 `agent.get_activity_summary()`，超过 idle limit 后调用 `agent.interrupt("Cron job timed out (inactivity)")` 并抛出 `TimeoutError`。锚点：`/code/hermes-agent/cron/scheduler.py` 中 “Run the agent with an inactivity-based timeout” 分支。
 
+## Codex / Claude Code 参考
+
+Codex manual 把失败边界集中在 sandbox、approval、MCP trust、hooks、rules 和 CI/automation safety 上。Codex sandbox 有 read-only、workspace-write、full access 等 presets；automations 在后台运行且使用默认 sandbox，full access 会提高风险；GitHub Action 文档强调限制触发者、保护 API key、避免把未清洗的 PR/issue 内容直接喂给 Codex（官方文档：`https://developers.openai.com/codex/codex-manual.md` 的 `Agent approvals & security`、`Sandbox`、`Automations`、`Codex GitHub Action`）。
+
+Codex MCP 配置也有失败面：stdio/streamable HTTP server 有 startup timeout、tool timeout、required flag、enabled/disabled tools、default tools approval mode 和 per-tool override。若 MCP server 不可用，`required = true` 可使 startup fail；若工具权限过宽，外部 tool action 会扩大 blast radius（官方文档：`https://developers.openai.com/codex/codex-manual.md` 的 `Model Context Protocol`）。
+
+Claude Code 的 hooks 文档把 `PreToolUse`、`PermissionRequest`、`PostToolUse`、`UserPromptSubmit`、`Stop`、`SubagentStart`、`SubagentStop` 等事件作为 lifecycle control points；hooks 可以阻止工具调用、记录审计、扫描 prompt 或在 turn 停止时执行检查。Scheduled tasks 还有明确的失败/控制边界：低优先级入队、当前 turn 结束后触发、50 个 task 上限、7 天 recurring expiry、`CLAUDE_CODE_DISABLE_CRON=1` 可关闭 scheduler（官方文档：`https://code.claude.com/docs/en/hooks`；`https://code.claude.com/docs/en/scheduled-tasks`）。
+
+因此加入 Codex/Claude Code 后，本章的恢复策略要多一层“host policy failure”：即使 agent loop 没崩，也可能因为 sandbox 拒绝、approval policy、hook denial、MCP startup/tool timeout、subagent hook、scheduled task expiry 或 CI trigger policy 而停止。最小实现应把这些停止原因结构化记录，不要只归为 model error 或 tool exception。
+
 ## 异同点表
 
 | 维度 | OpenClaw | Hermes | 学习结论 |
@@ -61,6 +73,15 @@ Hermes 的 cron timeout 是 inactivity-based timeout：默认读取 `HERMES_CRON
 | prompt injection scanning | 安全文档强调 prompt/content guardrails 只是降低风险，不是 auth/sandbox boundary。锚点：`/code/openclaw/docs/gateway/security/index.md` | cron 对组装后的 prompt 扫描，包括 runtime 加载的 skill 内容。锚点：`/code/hermes-agent/cron/scheduler.py::_scan_assembled_cron_prompt` | 自动化任务必须扫描最终送入模型的 prompt，而不只是创建时的用户字段。 |
 | sandboxing | 可选，mode/scope/backend 可配置，Gateway 不进 sandbox。锚点：`/code/openclaw/docs/gateway/sandboxing.md` | README 声明有 local/Docker/SSH/Singularity/Modal/Daytona/Vercel Sandbox terminal backends；本章未核实其安全边界实现。锚点：`/code/hermes-agent/README.md` | 沙箱是 blast radius 控制，不应被写成绝对安全保证。 |
 
+## Codex / Claude Code 参照表
+
+| 维度 | Codex | Claude Code | 学习结论 |
+|---|---|---|---|
+| sandbox/approval | read-only、workspace-write、full access、approval policy、rules/admin requirements 共同限制动作。 | permissions/hooks 可拦截工具、prompt、stop、subagent 生命周期。 | host policy failure 要独立于 model/tool exception 记录。 |
+| MCP 失败 | MCP server 有 startup timeout、tool timeout、required、enabled/disabled tools。 | remote MCP/API tool use 也会引入外部服务失败和权限边界。 | MCP failure 应分为连接失败、工具超时、权限拒绝和结果错误。 |
+| unattended run | automations/GitHub Action 需要触发者控制、secret 保护和 prompt injection 清洗。 | scheduled tasks 有低优先级入队、task 上限、过期和禁用开关。 | 后台任务失败不一定是 agent loop 失败，可能是 scheduler/CI/policy 结果。 |
+| lifecycle hooks | hooks 可在 tool、compact、prompt、stop、subagent 事件运行。 | hooks 是阻止动作、审计和恢复的关键控制点。 | 最小恢复模型应保留 hook denial、timeout 和 retryable 分类。 |
+
 ## 源码阅读路线
 
 1. 先读 `/code/openclaw/docs/concepts/agent-loop.md` 的 `Timeouts` 与 `Where things can end early`，建立 runtime timeout、wait timeout、model idle timeout 的边界。
@@ -71,6 +92,8 @@ Hermes 的 cron timeout 是 inactivity-based timeout：默认读取 `HERMES_CRON
 6. 读 `/code/hermes-agent/run_agent.py::_repair_tool_call_arguments`，再跳到 `AIAgent.run_conversation` 中 tool call validation 分支。
 7. 读 `/code/hermes-agent/run_agent.py` 中 `self._api_max_retries`、`_log_stream_retry`、`_emit_stream_drop`、API error recovery 和 fallback 分支。
 8. 读 `/code/hermes-agent/cron/scheduler.py::_build_effective_prompt`、`_scan_assembled_cron_prompt`、cron inactivity timeout 分支。
+9. Codex 读 manual 的 `Agent approvals & security`、`Sandbox`、`Model Context Protocol`、`Hooks`、`Automations`、`Codex GitHub Action`，确认 host policy、MCP timeout 和 unattended run 的失败边界。
+10. Claude Code 读 `https://code.claude.com/docs/en/hooks` 与 `https://code.claude.com/docs/en/scheduled-tasks`，确认 hook denial、scheduled task 入队/上限/过期和禁用开关。
 
 ## 最小复现抽象
 
@@ -105,9 +128,14 @@ class PromptInjectionScanner:
 class RecoveryMonitor:
     def touch(self, kind: str, detail: str) -> None: ...
     def classify(self) -> str: ...  # long_running | stalled | stuck
+
+class HostPolicyFailure:
+    source: str      # sandbox | approval | hook | mcp | ci | scheduler
+    reason: str
+    retryable: bool
 ```
 
-最小流程是：入口创建 `AbortController`；`AgentLoop` 同时安装 runtime timer 和 idle watchdog；每次模型 chunk、tool event、status event 调用 `RecoveryMonitor.touch()`；provider call 按 `RetryPolicy` 重试；自动化任务在“最终组装 prompt”后调用 `PromptInjectionScanner.scan_final_prompt()`；工具执行前根据 `SandboxPolicy` 决定 workspace/backend；诊断线程或队列调度器按 `RecoveryMonitor.classify()` 决定记录、等待、abort-drain 或释放 lane。抽象依据：`/code/openclaw/docs/concepts/agent-loop.md`、`/code/openclaw/docs/concepts/queue.md`、`/code/openclaw/docs/concepts/retry.md`、`/code/openclaw/docs/gateway/sandboxing.md`、`/code/hermes-agent/run_agent.py`、`/code/hermes-agent/cron/scheduler.py`。
+最小流程是：入口创建 `AbortController`；`AgentLoop` 同时安装 runtime timer 和 idle watchdog；每次模型 chunk、tool event、status event 调用 `RecoveryMonitor.touch()`；provider call 按 `RetryPolicy` 重试；自动化任务在“最终组装 prompt”后调用 `PromptInjectionScanner.scan_final_prompt()`；工具执行前根据 `SandboxPolicy` 决定 workspace/backend；MCP server startup/tool timeout、hook denial、approval denial、CI trigger policy 和 scheduler expiry 记录为 `HostPolicyFailure`；诊断线程或队列调度器按 `RecoveryMonitor.classify()` 决定记录、等待、abort-drain 或释放 lane。抽象依据：`/code/openclaw/docs/concepts/agent-loop.md`、`/code/openclaw/docs/concepts/queue.md`、`/code/openclaw/docs/concepts/retry.md`、`/code/openclaw/docs/gateway/sandboxing.md`、`/code/hermes-agent/run_agent.py`、`/code/hermes-agent/cron/scheduler.py`、Codex manual、Claude Code hooks/scheduled tasks 文档。
 
 ## 容易误解的点
 
@@ -116,6 +144,8 @@ class RecoveryMonitor:
 - prompt injection scanning 不能只扫创建时的字段；Hermes cron 的修复点正是扫描 user prompt 加 runtime skill content 之后的 assembled prompt。锚点：`/code/hermes-agent/cron/scheduler.py::_scan_assembled_cron_prompt`。
 - 重试不是重跑整个任务；OpenClaw retry 文档明确按 HTTP request retry，避免重复非幂等操作。锚点：`/code/openclaw/docs/concepts/retry.md`。
 - safe writer 不是文件写入原子性机制；Hermes 的 `_SafeWriter` 解决的是 stdout/stderr broken pipe 或 closed file。锚点：`/code/hermes-agent/run_agent.py::_SafeWriter`。
+- Codex 的 read-only/workspace-write/full-access sandbox 不等于业务授权；外部 MCP tool、CI trigger、secrets 暴露和 hook trust 仍要单独建模。
+- Claude Code scheduled task 的过期或禁用不是模型失败；应记录为 scheduler/policy 结果，而不是 provider error。
 
 ## 待核实问题
 

@@ -3,6 +3,8 @@
 > 参考版本：
 > - OpenClaw：`/code/openclaw@ca31a705d02e42ffcfb2c5884bb55339a6d0cbdc`
 > - Hermes Agent：`/code/hermes-agent@3d4297a59a8607ed24850524d229f5f42520d087`
+> - Codex：OpenAI Codex manual，核验于 2026-06-13：`https://developers.openai.com/codex/codex-manual.md`
+> - Claude Code：Anthropic subagents 官方文档，核验于 2026-06-13：`https://code.claude.com/docs/en/sub-agents`
 
 ## 本章问题
 
@@ -40,6 +42,16 @@ Hermes 的 Kanban guidance 已核实部分在 `agent/prompt_builder.py`。`KANBA
 
 Hermes 的 Kanban tools 只在 dispatcher worker 或显式 kanban toolset 下暴露。`kanban_tools.py` 注释声明普通 `hermes chat` 没有 kanban tools；`_check_kanban_mode()` 检查 `HERMES_KANBAN_TASK` 或 profile toolsets；`_enforce_worker_task_ownership()` 阻止 worker 修改非自己 task id。锚点：`/code/hermes-agent/tools/kanban_tools.py` 的模块注释、`_check_kanban_mode()`、`_enforce_worker_task_ownership()`。
 
+## Codex / Claude Code 参考
+
+Codex manual 把 subagent workflows 定义为 Codex spawn specialized agents in parallel，由主 agent 汇总结果。官方文档强调 Codex 不会自动 spawn subagents，只有用户明确要求 subagents 或 parallel agent work 时才应使用；建议优先用于 read-heavy 的 exploration、tests、triage、summarization，并谨慎对待并行写代码导致的冲突（官方文档：`https://developers.openai.com/codex/codex-manual.md` 的 `Subagents`）。
+
+Codex 的另一层“多 agent”是 customization 里的 specialized subagents：不同 agent 可有不同 role、tools、MCP servers 和 model/reasoning 设置。它更接近任务内并行委派或专用角色，而不是 OpenClaw 的长期多 persona Gateway routing（官方文档：`https://developers.openai.com/codex/codex-manual.md` 的 `Customization`、`Subagents`）。
+
+Claude Code 的 sub-agents 是可配置的 specialized agents：可以放在 project `.claude/agents` 或 user `~/.claude/agents`，带 name/description/tools/model/frontmatter；Claude 根据 description 委派，用户也可显式指定。官方文档还说明 subagents 拥有 separate context window，适合隔离上下文和专门工具权限，并可配合 hooks 的 `SubagentStart`/`SubagentStop` 事件（官方文档：`https://code.claude.com/docs/en/sub-agents`；`https://code.claude.com/docs/en/hooks`）。
+
+所以本章对四个系统的归纳应分成三类：OpenClaw 是 Gateway 级长期 agent routing；Hermes 是 run 内 `delegate_task` 加 durable Kanban worker；Codex/Claude Code 更强调 subagent workflow、专用 context window、专门工具/模型和由主 agent 汇总。它们都叫 subagent/agent，但生命周期和隔离单位不同。
+
 ## 异同点表
 
 | 维度 | OpenClaw | Hermes | 学习结论 |
@@ -51,6 +63,15 @@ Hermes 的 Kanban tools 只在 dispatcher worker 或显式 kanban toolset 下暴
 | 任务板 | 本章未在 OpenClaw 已读材料中看到 Hermes 式 Kanban DB。锚点：`/code/openclaw/docs/concepts/multi-agent.md` | `KANBAN_GUIDANCE` 和 `kanban_*` tools 以 `~/.hermes/kanban.db` 协调 worker/orchestrator。锚点：`/code/hermes-agent/agent/prompt_builder.py`、`/code/hermes-agent/tools/kanban_tools.py` | 跨 run 的多 worker 协作需要 durable task board，而不是只靠一次上下文。 |
 | 插件介入 subagent | plugin hooks 包括 `subagent_spawning` 等。锚点：`/code/openclaw/docs/plugins/hooks.md` | 本章已核实的 Hermes subagent 控制点是 `delegate_tool.py` 与 `run_agent.py`，未确认通用 plugin hook。锚点：`/code/hermes-agent/tools/delegate_tool.py`、`/code/hermes-agent/run_agent.py` | subagent 生命周期如果要被扩展，需要显式 hook 或统一 delegate runner。 |
 
+## Codex / Claude Code 参照表
+
+| 维度 | Codex | Claude Code | 学习结论 |
+| --- | --- | --- | --- |
+| 触发方式 | subagent workflows 需要用户明确要求 parallel/subagent work。 | Claude 可按 subagent description 自动委派，也可显式指定。 | “自动委派”是 host policy，不是 subagent 概念必然属性。 |
+| 隔离单位 | 专用 agents/threads 可并行做探索、测试、总结。 | subagent 有 separate context window，可配置 tools/model。 | 隔离至少包括 context、tools、model 和结果摘要边界。 |
+| 推荐场景 | read-heavy exploration、tests、triage、summarization；谨慎并行写。 | 专业化任务、隔离上下文、限制工具权限。 | 并行写入需要额外冲突控制；读多写少更适合作为默认。 |
+| 生命周期 hook | Codex hooks 支持 subagent start/stop 事件。 | hooks 支持 `SubagentStart`/`SubagentStop`。 | subagent runner 应暴露生命周期事件，方便审计和策略控制。 |
+
 ## 源码阅读路线
 
 1. OpenClaw 先读 `/code/openclaw/docs/concepts/multi-agent.md`，重点看 `What is "one agent"?`、`Paths`、`Routing rules`、workspace note。
@@ -60,16 +81,19 @@ Hermes 的 Kanban tools 只在 dispatcher worker 或显式 kanban toolset 下暴
 5. Hermes 再读 `/code/hermes-agent/run_agent.py` 的 `_active_children`、`interrupt()`、`_cap_delegate_task_calls()`、`_dispatch_delegate_task()`。
 6. Hermes Kanban 读 `/code/hermes-agent/agent/prompt_builder.py` 的 `KANBAN_GUIDANCE`，再读 `/code/hermes-agent/tools/kanban_tools.py` 的 `_check_kanban_mode()`、`_enforce_worker_task_ownership()`。
 7. Hermes PDF `/code/hermes-agent/docs/hermes-kanban-v1-spec.pdf` 待实际解析后再加入事实。
+8. Codex 读 manual 的 `Subagents` 与 `Customization`，确认 explicit triggering、parallel subagent workflows、read-heavy 建议和 model/reasoning 配置边界。
+9. Claude Code 读 `https://code.claude.com/docs/en/sub-agents` 和 `https://code.claude.com/docs/en/hooks`，确认 `.claude/agents`、separate context window、tool/model 配置和 subagent lifecycle hooks。
 
 ## 最小复现抽象
 
-这是学习抽象，不是两个项目的精确实现。
+这是学习抽象，不是 OpenClaw、Hermes、Codex 或 Claude Code 的精确实现。
 
 - `AgentProfile`：描述 agent 的身份、workspace、state dir、auth store、tool policy、model policy；对应 OpenClaw multi-agent agent scope 与 Hermes child agent 配置。
 - `WorkspaceAllocator`：为 agent 或 worker 分配默认 cwd、task workspace 和可选 sandbox；对应 OpenClaw workspace/agentDir 与 Hermes `$HERMES_KANBAN_WORKSPACE`。
 - `DelegationQueue`：父 agent 提交 child task，限制并发、深度、工具集和审批策略；对应 Hermes `delegate_task` 与 OpenClaw subagent hooks。
 - `TaskBoard`：持久任务、状态、父子依赖、heartbeat、block、complete、handoff；对应 Hermes `~/.hermes/kanban.db` 与 `kanban_*` tools。
 - `SubagentRunner`：启动 fresh child run，隔离上下文，收集 summary，向父 agent 或任务板交付结果；对应 Hermes `delegate_tool.py` 和 OpenClaw subagent/tool docs。
+- `SubagentProfile`：描述子 agent 的 role、description、allowed tools、model/reasoning、context window 和触发方式；Codex/Claude Code 的 subagent 文档都把这些作为专用 worker 的关键配置。
 
 ## 容易误解的点
 
@@ -77,6 +101,8 @@ Hermes 的 Kanban tools 只在 dispatcher worker 或显式 kanban toolset 下暴
 - OpenClaw workspace 隔离不是安全沙箱；文档明确绝对路径仍可能访问 host 其他位置，除非启用 sandbox。锚点：`/code/openclaw/docs/concepts/multi-agent.md`。
 - Hermes `delegate_task` 不是 Kanban board 的替代品。`KANBAN_GUIDANCE` 明确说 board tasks 用 `kanban_*`，`delegate_task` 用于自己 run 内的短 reasoning subtasks。锚点：`/code/hermes-agent/agent/prompt_builder.py`。
 - Hermes worker 不能随意改其他 task。`_enforce_worker_task_ownership()` 会在 dispatcher-scoped worker 中拒绝修改非 `$HERMES_KANBAN_TASK` 的 task。锚点：`/code/hermes-agent/tools/kanban_tools.py`。
+- Codex subagents 不应写成自动触发的默认行为；官方文档说只有用户明确要求 subagents 或 parallel agent work 时才应使用。
+- Claude Code subagents 的 separate context window 不是安全边界本身；工具 allowlist、permissions、hooks 和宿主 sandbox 仍然要单独设计。
 
 ## 待核实问题
 
