@@ -1,4 +1,4 @@
-# V1.0 ccc 第一阶段 Coding Agent 模块概要设计说明书
+# V1.1 ccc 第一阶段 Coding Agent 模块概要设计说明书
 
 > 文件模板编号：SFRD-TS-02
 > 密级：B级（项目组内公开）
@@ -11,6 +11,7 @@
 | 修订版本号 | 作者 | 日期 | 简要说明 |
 |-----------|------|------|---------|
 | V1.0 | Codex | 20260614 | 基于 `设计文档.md`、`12-implementation-plan.md` 和模板起稿，覆盖第一阶段最小实现 |
+| V1.1 | Codex | 20260614 | 新增 Plan 模型、运行模式、PlanManager、plan API/events 和执行前确认策略 |
 
 ---
 
@@ -58,6 +59,8 @@
 | 单用户多 session | 支持单用户创建、切换、恢复多个 session。 | `设计文档.md` | P0 |
 | 聊天记录持久化 | 所有聊天、工具调用、事件写入 `{pwd}/sessions/{session_uuid}` 下 JSONL；单文件超过 10MB 分块。 | `设计文档.md` | P0 |
 | AgentLoop | 支持模型调用、工具调用、工具结果回填、最终响应。 | 第一阶段实现方案 | P0 |
+| Plan 模型 | 将复杂任务的目标、步骤、风险、验证方式和执行状态建模为可持久化对象。 | 用户要求 | P0 |
+| 运行模式 | 支持 `chat/plan/execute/review/serve` 等模式，区分分析、计划、执行和服务化入口。 | 用户要求 | P0 |
 | 工具体系 | 支持内置 tools、扩展 tools、skills、MCP；工具可注册。 | `设计文档.md` | P0 |
 | HTTP 通信 | 第一阶段前后端通过 HTTP API 通信。 | `设计文档.md` | P0 |
 | React TUI 风格 Web 界面 | 前端用 React + pnpm 实现类似 Codex / Claude Code 终端体验的 Web UI；第一阶段不是运行在终端里的真实 TUI。 | `设计文档.md` | P0 |
@@ -80,6 +83,8 @@
 | `POST /api/sessions/{session_id}/messages` | `content`, `options?` | `run_id` | 提交用户消息并启动一次 run。 | 返回后可轮询或读取事件流。 |
 | `GET /api/runs/{run_id}` | `run_id` | run status, final response | 查询 run 状态。 | 用于页面恢复。 |
 | `GET /api/runs/{run_id}/events` | `run_id`, `cursor?` | `events[]`, `next_cursor` | 拉取 run 事件。 | 第一阶段用 HTTP 轮询；后续可切 SSE。 |
+| `GET /api/runs/{run_id}/plan` | `run_id` | plan object | 查询 run 关联的计划。 | 仅当 run 产生 plan 时存在。 |
+| `POST /api/plans/{plan_id}/execute` | `plan_id`, `options?` | `run_id` | 执行已确认的计划。 | 将运行模式切换为 `execute`。 |
 | `POST /api/runs/{run_id}/approval` | `decision`, `approval_id` | decision result | 对待审批工具调用批准或拒绝。 | 高风险工具调用阻塞等待。 |
 | `POST /api/runs/{run_id}/stop` | `reason?` | stop result | 中断 run。 | 设置 cancel flag。 |
 | `GET /api/tools` | 无 | `tools[]` | 查看已注册工具。 | 包含 builtin、extension、MCP。 |
@@ -93,6 +98,8 @@
   - `content: string`，用户输入。
   - `options.cwd?: string`，本次执行工作目录，必须在允许范围内。
   - `options.model?: string`，可选模型名。
+  - `options.mode?: "chat" | "plan" | "execute" | "review"`，运行模式，默认 `chat`。
+  - `options.plan_id?: string`，执行已有计划时传入。
   - `options.compact_threshold_bytes?: number`，可选 compact 阈值覆盖。
 - **输出参数**：
   - `run_id: string`
@@ -109,6 +116,8 @@
   - `404 SESSION_NOT_FOUND`
   - `409 SESSION_BUSY`
   - `422 INVALID_MESSAGE`
+  - `422 INVALID_RUN_MODE`
+  - `409 PLAN_CONFIRMATION_REQUIRED`
   - `507 SESSION_STORAGE_FULL`
   - `500 RUN_CREATE_FAILED`
 
@@ -161,12 +170,16 @@
 |----------|-----------------|---------|---------|------|
 | `lifecycle.started` | 后端发送 | JSON object | run 启动 | 包含 `run_id`、`session_id`、`cwd`。 |
 | `assistant.delta` | 后端发送 | JSON object | 模型流式输出 | 第一阶段如 provider 不支持流式，可聚合后一次发送。 |
+| `plan.created` | 后端发送 | JSON object | plan 模式生成计划 | 包含 `plan_id`、步骤、风险、验证方式。 |
+| `plan.updated` | 后端发送 | JSON object | 计划步骤状态变化 | execute 模式下更新 step 状态。 |
+| `plan.completed` | 后端发送 | JSON object | 计划执行完成 | 包含完成步骤和验证结果摘要。 |
 | `tool.call.pending` | 后端发送 | JSON object | 模型请求调用工具 | 包含工具名、参数摘要、风险级别。 |
 | `tool.approval.required` | 后端发送 | JSON object | 工具调用需要审批 | 前端显示确认/拒绝控件。 |
 | `tool.result` | 后端发送 | JSON object | 工具执行完成 | 包含 stdout/stderr/result/error 摘要。 |
 | `compact.started` | 后端发送 | JSON object | 上下文超过阈值 | 表示开始压缩历史上下文。 |
 | `compact.completed` | 后端发送 | JSON object | 压缩完成 | 包含摘要引用。 |
 | `lifecycle.completed` | 后端发送 | JSON object | run 成功完成 | 包含 final response。 |
+| `lifecycle.cancelled` | 后端发送 | JSON object | run 被用户取消 | 包含取消原因和未完成步骤。 |
 | `lifecycle.failed` | 后端发送 | JSON object | run 失败 | 包含错误码和可恢复建议。 |
 
 ### 3.3 调测接口
@@ -261,6 +274,7 @@ flowchart TB
   subgraph FE["前端泳道：React TUI-style Web UI"]
     FE_UI["TUI Chat View"]
     FE_SESSION["Session Panel"]
+    FE_PLAN["Plan Panel"]
     FE_APPROVAL["Approval Panel"]
   end
 
@@ -273,6 +287,7 @@ flowchart TB
   subgraph CORE["Agent Core 泳道"]
     SESSION["SessionStore"]
     TRANSCRIPT["TranscriptStore"]
+    PLAN["PlanManager"]
     LOOP["AgentLoop"]
     PROMPT["PromptBuilder"]
     COMPACT["CompactManager"]
@@ -293,13 +308,16 @@ flowchart TB
 
   FE_UI --> API_ROUTER
   FE_SESSION --> API_ROUTER
+  FE_PLAN --> API_ROUTER
   FE_APPROVAL --> API_ROUTER
   API_ROUTER --> RUN_COORD
   API_ROUTER --> EVENT_API
   RUN_COORD --> SESSION
+  RUN_COORD --> PLAN
   RUN_COORD --> LOOP
   EVENT_API --> TRANSCRIPT
   LOOP --> PROMPT
+  LOOP --> PLAN
   LOOP --> COMPACT
   LOOP --> TOOL_REG
   LOOP --> PROVIDER
@@ -318,6 +336,7 @@ flowchart TB
 | RunCoordinator | 创建 run、检查 session busy、调度 AgentLoop。 |
 | SessionStore | 管理 session metadata、session 根目录、resume。 |
 | TranscriptStore | 追加写 JSONL 事件，处理 10MB 分块。 |
+| PlanManager | 管理 Plan 的创建、确认、执行状态和持久化。 |
 | AgentLoop | 核心模型/工具执行循环。 |
 | PromptBuilder | 组装 system prompt、session 摘要、工具 schema。 |
 | CompactManager | 超阈值上下文压缩。 |
@@ -333,8 +352,10 @@ flowchart TB
 |-----------|------|---------|------|
 | `session_id` | UUID string | SQLite / session 目录名 | 会话唯一标识。 |
 | `run_id` | UUID string | SQLite / event JSONL | 单次执行唯一标识。 |
+| `plan_id` | UUID string | SQLite / plan JSON | 任务计划唯一标识。 |
 | `session_root` | path | `{pwd}/sessions/{session_id}` | session 文件根目录。 |
 | `jsonl_chunk_index` | int | session metadata | 当前 transcript 分块序号。 |
+| `run_mode` | enum | SQLite / event JSONL | `chat/plan/execute/review/serve`。 |
 | `run_status` | enum | SQLite | `queued/running/waiting_approval/completed/failed/cancelled`。 |
 | `approval_id` | UUID string | SQLite / event JSONL | 待审批工具调用标识。 |
 | `compact_summary_id` | string | session metadata | 最近一次 compact 摘要引用。 |
@@ -346,7 +367,9 @@ flowchart TB
 | `sessions.root` | `{pwd}/sessions` | 本地可写路径 | session 根目录。 |
 | `sessions.chunk_size_mb` | `10` | `1-100` | JSONL 分块大小。 |
 | `agent.max_iterations` | `20` | `1-100` | 单次 run 最大模型/工具循环次数。 |
+| `agent.default_run_mode` | `chat` | `chat/plan/execute/review` | 默认运行模式。 |
 | `agent.compact_threshold_tokens` | `80000` | 正整数 | 触发 compact 的估算 token 阈值。 |
+| `plan.require_confirmation_before_execute` | `true` | boolean | plan 生成后是否必须用户确认才能执行。 |
 | `tools.command_timeout_sec` | `120` | `1-3600` | shell 命令超时。 |
 | `workspace.mode` | `workspace-write` | `read-only/workspace-write/danger-full-access` | 文件系统权限模式。 |
 | `approval.default_shell` | `prompt` | `allow/prompt/deny` | shell 工具默认审批策略。 |
@@ -363,6 +386,8 @@ flowchart TB
       metadata.json
       transcript-0001.jsonl
       transcript-0002.jsonl
+      plans/
+        plan-{plan_id}.json
       compact/
         compact-{timestamp}.md
       artifacts/
@@ -391,6 +416,8 @@ JSONL 每行是一条事件，必须包含：
 | JSONL 分块 | 10MB | 超过阈值滚动到下一分块。 |
 | 工具执行目录 | 默认限制在 cwd/workspace 内 | `danger-full-access` 需显式配置。 |
 | 命令超时 | 默认 120 秒 | 超时后终止进程并记录 tool error。 |
+| plan 模式副作用 | 禁止写文件和有副作用命令 | 只允许读取、分析和生成计划。 |
+| execute 模式前置条件 | 已确认 Plan 或显式用户指令 | 防止未确认计划直接改代码。 |
 | compact | 只做上下文摘要 | 不做长期 memory、dreaming、curator。 |
 | 通信方式 | HTTP | 第一阶段不使用 WebSocket。 |
 
@@ -543,6 +570,69 @@ sequenceDiagram
 | 摘要为空 | 视为 compact 失败，不覆盖现有 compact。 |
 | compact 后仍超限 | 继续压缩更早历史；最多两轮，仍失败则停止。 |
 
+#### 4.4.4 Plan 模型与运行模式流程
+
+**流程描述**：用户可以显式进入 `plan` 模式，让 agent 先读取仓库、分析风险并生成结构化计划。计划写入 transcript 和 `plans/` 目录。用户确认后，系统以 `execute` 模式执行该计划，并逐步更新计划步骤状态。
+
+```mermaid
+sequenceDiagram
+  autonumber
+  participant FE as 前端/CLI
+  participant API as HTTP API / CLI Adapter
+  participant RC as RunCoordinator
+  participant AL as AgentLoop
+  participant PM as PlanManager
+  participant TR as ToolRegistry
+  participant TS as TranscriptStore
+
+  FE->>API: submit message(mode=plan)
+  API->>RC: create_run(mode=plan)
+  RC->>AL: run_plan_mode(run_id)
+  AL->>TR: read-only tools
+  AL->>PM: create_plan(objective, steps, risks, verification)
+  PM->>TS: append(plan.created)
+  FE->>API: execute plan(plan_id)
+  API->>RC: create_run(mode=execute, plan_id)
+  RC->>PM: load_plan(plan_id)
+  RC->>AL: run_execute_mode(plan)
+  loop 每个步骤
+    AL->>PM: mark_step(running)
+    AL->>TR: dispatch allowed tools
+    AL->>PM: mark_step(completed/failed)
+    PM->>TS: append(plan.updated)
+  end
+  PM->>TS: append(plan.completed)
+```
+
+**运行模式定义**：
+
+| 模式 | 入口示例 | 工具权限 | 主要用途 |
+|------|---------|----------|----------|
+| `chat` | `ccc chat` / Web 默认输入 | 只读工具和低风险工具默认可用，高风险工具需审批。 | 普通问答、代码解释、小范围协助。 |
+| `plan` | `ccc plan "<task>"` / `mode=plan` | 默认只读；禁止写文件、patch 和有副作用命令。 | 生成可审查的任务计划。 |
+| `execute` | `ccc run --plan <id>` / `POST /api/plans/{id}/execute` | 按 WorkspacePolicy 和 ApprovalPolicy 执行。 | 执行已确认计划。 |
+| `review` | `ccc review` / `mode=review` | 默认只读。 | 代码审查、风险分析、变更说明。 |
+| `serve` | `ccc serve` | 不直接执行任务；启动 HTTP API。 | 供 React Web 前端调用。 |
+
+**Plan 状态机**：
+
+```text
+draft -> waiting_confirmation -> approved -> executing -> completed
+                                      \-> failed
+waiting_confirmation -> rejected
+executing -> cancelled
+```
+
+**异常处理**：
+
+| 异常场景 | 处理策略 |
+|----------|----------|
+| `plan` 模式请求写文件或执行命令 | ToolRegistry 直接拒绝，返回 `RUN_MODE_VIOLATION`，并要求切换到 `execute`。 |
+| 未确认 Plan 直接执行 | 返回 `409 PLAN_CONFIRMATION_REQUIRED`。 |
+| Plan 文件不存在或损坏 | 返回 `404 PLAN_NOT_FOUND` 或 `500 PLAN_LOAD_FAILED`，不启动 execute run。 |
+| execute 过程中步骤失败 | 标记当前 step 为 `failed`，写入 `plan.updated`，run 进入 `failed` 或等待用户指令。 |
+| 用户取消 execute | 标记未完成 step 为 `cancelled`，写入 `plan.updated` 和 `lifecycle.cancelled`。 |
+
 ### 4.5 可调试性机制分析及设计
 
 #### 4.5.1 日志设计
@@ -603,6 +693,7 @@ sequenceDiagram
 - `ToolRegistry`：注册、重复工具名、未知工具、工具异常。
 - `ApprovalPolicy`：低风险直通、高风险审批、拒绝、超时。
 - `WorkspacePolicy`：路径越界、软链接逃逸、read-only 写入。
+- `PlanManager`：plan 创建、确认、拒绝、执行、步骤状态迁移、损坏 plan 文件。
 - `CompactManager`：超阈值触发、摘要失败、摘要为空。
 - `AgentLoop`：正常工具闭环、非法 tool call、最大循环次数、取消。
 
@@ -617,6 +708,9 @@ sequenceDiagram
 - 停止 run。
 - session 不存在。
 - session busy。
+- `mode=plan` 生成计划。
+- 未确认 plan 执行被拒绝。
+- `mode=execute` 执行 plan 并更新步骤状态。
 - transcript 写入失败模拟。
 - compact 失败模拟。
 
@@ -640,6 +734,8 @@ sequenceDiagram
   - `running -> waiting_approval`
   - `waiting_approval -> running`
   - `running -> completed/failed/cancelled`
+- Plan 状态机只允许合法迁移，禁止从 `draft/waiting_confirmation` 跳过确认直接进入 `executing`。
+- execute run 需要持续写入 `plan.updated`，保证中断后能看到最后完成到哪个步骤。
 - 后端重启后，处于 `running/waiting_approval` 的 run 标记为 `failed`，错误码 `PROCESS_RESTARTED`。
 
 ### 4.9 安全性设计
@@ -648,6 +744,7 @@ sequenceDiagram
 - workspace-write 模式下禁止写 workspace 外路径。
 - 对软链接解析真实路径，防止 path escape。
 - shell 命令默认审批。
+- `plan` 和 `review` 模式默认只读，ToolRegistry 对写文件、patch 和有副作用 shell 直接返回 `RUN_MODE_VIOLATION`。
 - 危险命令拒绝或必须审批，例如 `rm -rf /`、`chmod -R`、`curl | sh`。
 - transcript 中工具输出按大小截断，完整输出可存 artifacts。
 - 不在日志中打印 API key。
@@ -683,7 +780,11 @@ chunk_size_mb = 10
 
 [agent]
 max_iterations = 20
+default_run_mode = "chat"
 compact_threshold_tokens = 80000
+
+[plan]
+require_confirmation_before_execute = true
 
 [workspace]
 mode = "workspace-write"
@@ -721,6 +822,30 @@ class RunStatus(str, Enum):
     FAILED = "failed"
     CANCELLED = "cancelled"
 
+class RunMode(str, Enum):
+    CHAT = "chat"
+    PLAN = "plan"
+    EXECUTE = "execute"
+    REVIEW = "review"
+    SERVE = "serve"
+
+class PlanStatus(str, Enum):
+    DRAFT = "draft"
+    WAITING_CONFIRMATION = "waiting_confirmation"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    EXECUTING = "executing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+class PlanStepStatus(str, Enum):
+    PENDING = "pending"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
 @dataclass
 class SessionMeta:
     session_id: str
@@ -734,6 +859,8 @@ class SessionMeta:
 class RunMeta:
     run_id: str
     session_id: str
+    mode: RunMode
+    plan_id: str | None
     status: RunStatus
     created_at: str
     updated_at: str
@@ -748,6 +875,31 @@ class Event:
     type: str
     ts: str
     payload: dict[str, Any]
+
+@dataclass
+class PlanStep:
+    step_id: str
+    title: str
+    description: str
+    status: PlanStepStatus
+    verification: str | None = None
+    risk_level: Literal["low", "medium", "high"] = "low"
+    error_code: str | None = None
+
+@dataclass
+class PlanMeta:
+    plan_id: str
+    session_id: str
+    objective: str
+    scope: str
+    status: PlanStatus
+    steps: list[PlanStep]
+    risks: list[str]
+    verification: list[str]
+    created_by_run_id: str
+    executed_by_run_id: str | None
+    created_at: str
+    updated_at: str
 
 @dataclass
 class ToolDefinition:
@@ -783,4 +935,4 @@ class ApprovalRequest:
 
 | 变更章节 | 变更内容 | 变更原因 | 对老功能/原有设计的影响 |
 |----------|---------|---------|---------------------|
-| 无 | 初始版本，无变更。 | 初始设计。 | 无。 |
+| 2/3/4/5 | 新增 Plan 模型、运行模式、PlanManager、plan API、plan events、Plan 数据结构和异常处理。 | 明确 CLI-first / Web 入口下的计划、执行、审查边界。 | 强化执行前确认和只读模式约束，不影响原有 session/transcript/tool 设计。 |
