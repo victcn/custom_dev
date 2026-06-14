@@ -46,6 +46,7 @@ Hermes 的入口阅读应从 `run_agent.py` 与 `gateway/` 并行开始。`run_a
 2. 再读 `02-gateway.md`，理解外部消息如何进入长驻进程、HTTP/API/Webhook/CLI/SDK/MCP 入口如何成为 session 或 run，以及如何再交给 agent loop；章节依据包括 `/code/openclaw/docs/gateway/protocol.md`、`/code/hermes-agent/gateway/run.py`、`/code/hermes-agent/gateway/session.py`，并补充 Codex CLI 与 Claude Agent SDK/MCP 官方文档参照。
 3. 然后读后续 `03-agent-loop.md`，把 Gateway 与 LLM/tool loop 接上；初始锚点是 `/code/openclaw/docs/concepts/agent-loop.md` 和 `/code/hermes-agent/run_agent.py`。
 4. 按需求跳读 `05-memory.md`、`06-skills.md`、`07-automation.md`：OpenClaw 起点分别是 `/code/openclaw/docs/concepts/memory.md`、`/code/openclaw/docs/tools/skills.md`、`/code/openclaw/docs/automation/cron-jobs.md`；Hermes 起点分别是 `/code/hermes-agent/agent/memory_manager.py`、`/code/hermes-agent/agent/curator.py`、`/code/hermes-agent/cron/scheduler.py`。
+5. 如果目标是自己实现一个类似 Codex / Claude Code 的工具，读完 `11-minimal-reproduction.md` 后继续读 `12-implementation-plan.md`；它把 OpenClaw/Hermes 的源码学习结论和 Codex/Claude Code 的官方参照收敛成一个最小实现路线。
 
 术语表：
 
